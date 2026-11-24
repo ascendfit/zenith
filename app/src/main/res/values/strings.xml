@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Zenith</string>
+    <string name="accessibility_desc">Zenith uses this service only to see which app is on screen while you focus, so it can send you back home when a blocked app, Shorts or Reels feed, or website opens. It does not read, store or send what you type or view.</string>
+</resources>
