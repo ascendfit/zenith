@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0D0D0D">
+<meta name="description" content="Zenith is a free focus timer with Pomodoro, strict mode, study rooms and daily limits.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+
+<title>Zenith</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout concept: a left rail (bottom bar on phones) around one stage. The timer is a ring of glowing ring that drains down as focus time passes. */
+:root{
+  --bg:#0D0D0D; --surface:#181818; --ink:#F4F6F1; --muted:#8E938A; --line:#2A2A2A;
+  --water:#82D65C; --water-soft:rgba(130,214,92,.22); --sun:#FFD640; --on-ink:#0D0D0D; --danger:#FF7F00; --on-flame:#0D2205;
+  --t0:#82D65C; --t1:#FFD640; --t2:#FF7F00; --t3:#6FB6FF; --t4:#F06AA5;
+  --f-display:'Bricolage Grotesque','Segoe UI',system-ui,sans-serif;
+  --f-body:'Figtree','Segoe UI',system-ui,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+*{box-sizing:border-box}
+body{background:radial-gradient(ellipse 90% 380px at 50% 0,rgba(65,106,46,.5),transparent) no-repeat,var(--bg);color:var(--ink);font:400 15px/1.5 var(--f-body);margin:0;
+  padding-block:16px 124px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));min-height:100%}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--water);outline-offset:2px}
+h1,h2,h3,p{margin:0}
+h2{font:700 22px/1.2 var(--f-display);text-wrap:balance}
+h3{font:600 12px/1.3 var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.app{max-width:1020px;margin:0 auto;display:grid;gap:20px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;font:700 22px var(--f-display);letter-spacing:-.01em}
+.brand svg{width:28px;height:28px;color:var(--water)}
+.rail{position:fixed;left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:20;background:#030303;border:1px solid var(--line);border-radius:30px;display:flex;justify-content:space-around;padding:6px}
+.rail button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:0;padding:6px 2px;color:var(--muted);font-size:11px;font-weight:600;border-radius:10px}
+.rail button svg{width:22px;height:22px}
+.rail button[aria-current="page"]{color:var(--water);background:rgba(130,214,92,.14)}
+.strict-on .rail{display:none}
+main{min-width:0}
+.view{display:none;gap:18px;flex-direction:column}
+.view.on{display:flex}
+.seg{display:inline-flex;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:3px;gap:2px;max-width:100%;flex-wrap:wrap}
+.seg button{border:0;background:none;padding:7px 14px;border-radius:9px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--on-ink)}
+.stage{position:relative;width:min(300px,78vw);aspect-ratio:1;margin:4px auto 0}
+.stage svg{width:100%;height:100%;display:block}
+.readout{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;text-align:center}
+.readout .time{font:700 clamp(40px,13vw,58px)/1 var(--f-mono);letter-spacing:-.03em}
+.readout .lbl{font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.vessel-ring{fill:none;stroke:var(--ink);stroke-width:3}
+.vessel-bg{fill:var(--surface)}
+.w1{fill:var(--water-soft)} .w2{fill:var(--water-soft)}
+#water{transition:transform 1s linear}
+.wave{animation:slide 7s linear infinite} .wave.b{animation-duration:11s;animation-direction:reverse}
+@keyframes slide{to{transform:translateX(-240px)}}
+@media (prefers-reduced-motion:reduce){.wave{animation:none}#water{transition:none}}
+.controls{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.btn{border:1px solid var(--ink);background:none;border-radius:999px;padding:11px 22px;font-weight:600}
+.btn.primary{background:var(--water);border-color:var(--water);color:var(--on-flame)}
+.btn.sun{background:var(--sun);border-color:var(--sun);color:#1b1304}
+.btn.sm{padding:6px 14px;font-size:13px}
+.btn.ghost{border-color:var(--line);color:var(--muted)}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.hold{position:relative;overflow:hidden;user-select:none;touch-action:none}
+.hold i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--danger);opacity:.35}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:16px;display:grid;gap:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row.between{justify-content:space-between}
+.grow{flex:1;min-width:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:none;border-radius:999px;padding:6px 13px;font-weight:500;color:var(--muted)}
+.chip[aria-pressed="true"]{border-color:var(--water);color:var(--water);background:var(--water-soft)}
+input[type=text],input[type=number],input[type=date],input[type=time],select{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-width:0;max-width:100%}
+input[type=number]{width:76px}
+input[type=range]{accent-color:var(--water);min-width:0;width:130px}
+label.f{display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:600}
+.switch{display:flex;align-items:center;gap:10px;font-weight:500}
+.switch input{width:18px;height:18px;accent-color:var(--water)}
+.say{display:flex;gap:12px;align-items:center;background:var(--water-soft);border-radius:16px;padding:12px 14px}
+.say p{font-size:14px}
+.say b{font-family:var(--f-display)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.stat{display:grid;gap:2px}
+.stat .n{font:700 28px/1.1 var(--f-display)}
+.stat .k{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.pill{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;border:1px solid var(--line);color:var(--muted)}
+.pill.ok{color:var(--water);border-color:var(--water)} .pill.warn{color:var(--sun);border-color:var(--sun)} .pill.bad{color:var(--danger);border-color:var(--danger)}
+.list{display:grid;gap:8px}
+.item{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);min-width:0}
+.item .t{min-width:0;flex:1;overflow-wrap:break-word}
+select[data-al]{width:92px;padding:6px 8px}
+.item .sub{font-size:12px;color:var(--muted)}
+.item.done .t b{text-decoration:line-through;color:var(--muted)}
+.bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--water);border-radius:6px}
+.bar.warn>i{background:var(--sun)} .bar.bad>i{background:var(--danger)}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.day{border:1px solid var(--line);background:none;border-radius:12px;padding:8px 0;display:grid;gap:2px;justify-items:center;font-size:12px;color:var(--muted)}
+.day b{font:700 17px var(--f-display);color:var(--ink)}
+.day[aria-pressed="true"]{background:var(--ink);color:var(--on-ink);border-color:var(--ink)} .day[aria-pressed="true"] b{color:var(--on-ink)}
+.day .dot{width:6px;height:6px;border-radius:50%;background:var(--water);visibility:hidden}.day .dot.on{visibility:visible}
+.chart{overflow-x:auto}
+.chart svg{display:block;width:100%;min-width:320px;height:auto}
+.chart text{fill:var(--muted);font:500 11px var(--f-body)}
+.gl{stroke:var(--line);stroke-width:1}
+.bb{fill:var(--water)} .bb.today{fill:var(--sun)}
+.tagrow{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;font-size:14px}
+.tagrow .bar>i{background:var(--c)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--on-ink);padding:10px 18px;border-radius:999px;font-weight:600;z-index:40;max-width:90vw;text-align:center}
+.empty{color:var(--muted);font-size:14px;padding:6px 0}
+.note{font-size:13px;color:var(--muted)}
+.lock{position:fixed;inset:0;z-index:10;pointer-events:none}
+.lead{font-size:14px;color:var(--muted);max-width:60ch}
+.rep{display:flex;gap:6px}
+.rep button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:none;font-weight:600;color:var(--muted)}
+.rep button[aria-pressed="true"]{background:var(--water);color:var(--on-flame);border-color:var(--water)}
+.hud{display:flex;gap:12px;align-items:center}
+.ava{width:44px;height:44px;border-radius:50%;background:#F06AA5;color:#0D0D0D;display:grid;place-items:center;font:700 20px var(--f-display);flex:none}
+.ringwrap{position:relative;width:min(300px,78vw);aspect-ratio:1;margin:4px auto 0}
+.ringwrap>svg{width:100%;height:100%;display:block}
+.zeehome{position:absolute;inset:0;display:grid;place-items:center}
+.zeehome svg{width:58%;height:auto;display:block}
+.ringtxt{text-align:center;color:var(--muted)} .ringtxt b{color:var(--ink);font-size:20px}
+.mv{width:48px;flex:none} .mv svg{width:48px;height:auto;display:block}
+.startpill{flex:1 1 280px;max-width:420px;display:flex;align-items:center;justify-content:space-between;background:#FDFFFA;color:#0D2205;border:0;border-radius:999px;padding:8px 8px 8px 26px;font:600 17px var(--f-body)}
+.startpill .go{width:62px;height:44px;border-radius:999px;background:linear-gradient(#95D976,#6FCB45);display:grid;place-items:center}
+.startpill .go svg{width:22px;height:22px}
+.logo svg{width:30px;height:32px;display:block}
+.badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:16px 10px}
+.badge{display:grid;justify-items:center;gap:3px;text-align:center}
+.badge b{font-size:12px} .badge i{font-style:normal;color:var(--muted);font-size:11px}
+.hex{width:76px;height:84px;clip-path:polygon(50% 0,93% 25%,93% 75%,50% 100%,7% 75%,7% 25%);background:#222;display:grid;place-items:center;font:700 18px var(--f-display);color:#666}
+.badge.on .hex{background:linear-gradient(160deg,#B9F59B,#6FCB45);color:#0D2205}
+.badge:not(.on){opacity:.65}
+#confetti{position:fixed;inset:0;pointer-events:none;z-index:60}
+.pop{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.65);display:grid;place-items:center;padding:24px}
+.popcard{background:var(--surface);border:1px solid var(--line);border-radius:26px;padding:22px 26px;text-align:center;display:grid;gap:10px;justify-items:center;max-width:340px}
+.popcard svg{width:130px;height:auto}
+.perm{display:flex}
+.appic{width:36px;height:36px;border-radius:9px;background:var(--line);flex:none}
+textarea{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%;color:inherit;font:inherit;resize:vertical}
+.item.switch{cursor:pointer}
+@media (min-width:880px){
+  body{padding-block:28px 40px}
+  .app{grid-template-columns:200px minmax(0,1fr);gap:40px;align-items:start}
+  .head{grid-column:1/-1}
+  .rail{position:sticky;top:24px;flex-direction:column;justify-content:flex-start;border:1px solid var(--line);border-radius:18px;padding:10px;gap:4px;left:auto;right:auto;bottom:auto}
+  .rail button{flex:none;flex-direction:row;gap:12px;font-size:15px;padding:11px 12px;justify-content:flex-start}
+  .strict-on .rail{display:flex;opacity:.3;pointer-events:none}
+  .toast{bottom:28px}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="head">
+    <div class="brand">
+      <span class="logo" id="logo"></span>
+      Zenith
+    </div>
+    <button class="btn sm ghost" id="auth" hidden></button>
+  </header>
+  <nav class="rail" id="rail" aria-label="Sections"></nav>
+  <main>
+    <!-- FOCUS -->
+    <section class="view" id="v-focus" aria-label="Focus">
+      <div class="hud"><div class="ava" id="ava">Z</div><div class="grow"><div class="row between"><b id="lvlname"></b><span class="pill" id="streakpill"></span></div><div class="bar" style="height:6px;margin:6px 0 2px"><i id="xpbar"></i></div><div class="note" id="xptxt" style="font-size:11px"></div></div></div>
+      <div id="home"><div class="ringwrap"><svg viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="104" fill="none" stroke="var(--line)" stroke-width="14"/><circle id="ringp" cx="120" cy="120" r="104" fill="none" stroke="var(--water)" stroke-width="14" stroke-linecap="round" stroke-dasharray="653.45" stroke-dashoffset="653.45" transform="rotate(-90 120 120)" style="transition:stroke-dashoffset .8s ease"/></svg><div class="zeehome" id="zeehome"></div></div><p class="ringtxt" id="ringtxt"></p></div>
+      <div class="row" id="modesrow" style="justify-content:center"><div class="seg" id="modes" role="group" aria-label="Timer mode">
+        <button data-mode="timer" aria-pressed="false">Timer</button>
+        <button data-mode="stopwatch" aria-pressed="false">Stopwatch</button>
+        <button data-mode="pomodoro" aria-pressed="true">Pomodoro</button>
+      </div></div>
+      <div class="stage">
+        <svg viewBox="0 0 240 240" aria-hidden="true">
+          <defs><clipPath id="clipv"><circle cx="120" cy="120" r="105"/></clipPath></defs>
+          <circle class="vessel-bg" cx="120" cy="120" r="105"/>
+          <g clip-path="url(#clipv)"><g id="water" transform="translate(0 232)">
+            <g class="wave"><path id="wv1" class="w1"/></g>
+            <g class="wave b" transform="translate(-60 6)"><path id="wv2" class="w2"/></g>
+          </g></g>
+          <circle class="vessel-ring" cx="120" cy="120" r="108"/>
+        </svg>
+        <div class="readout"><div class="time" id="time">25:00</div><div class="lbl" id="phase">Focus</div></div>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="say"><div class="mv" id="mv"></div><p id="say"></p></div>
+      <div class="panel" id="setup"></div>
+      <div class="panel" id="optpanel">
+        <div class="row between">
+          <label class="switch" for="strict"><input type="checkbox" id="strict"> Strict mode</label>
+          <span class="note" style="max-width:36ch">No pause, no early exit. Leaving this tab for more than 15 seconds ends the session. Give up by holding a button.</span>
+        </div>
+        <div class="row">
+          <label class="f" for="sound">Ambient sound<select id="sound">
+            <option value="off">Off</option><option value="rain">Rain</option><option value="waves">Waves</option><option value="brown">Brown noise</option><option value="hum">Low hum</option><option value="white">White noise</option>
+          </select></label>
+          <label class="f" for="vol">Volume<input type="range" id="vol" min="0" max="100"></label>
+          <label class="f" for="goal">Daily goal (min)<input type="number" id="goal" min="10" max="720"></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLAN -->
+    <section class="view" id="v-plan" aria-label="Plan">
+      <div class="row between"><h2>Plan</h2>
+        <div class="row"><button class="btn sm ghost" id="wprev" aria-label="Previous week">&larr;</button><span id="wlabel" class="note" style="min-width:110px;text-align:center"></span><button class="btn sm ghost" id="wnext" aria-label="Next week">&rarr;</button></div></div>
+      <div class="week" id="week"></div>
+      <div class="list" id="daylist"></div>
+      <form class="panel" id="planform">
+        <h3>Schedule a session</h3>
+        <div class="row">
+          <label class="f grow" for="p-title">What<input type="text" id="p-title" maxlength="60" placeholder="Organic chemistry, chapter 4"></label>
+          <label class="f" for="p-tag">Tag<select id="p-tag"></select></label>
+        </div>
+        <div class="row">
+          <label class="f" for="p-date">Date<input type="date" id="p-date"></label>
+          <label class="f" for="p-time">Time<input type="time" id="p-time" value="18:00"></label>
+          <label class="f" for="p-mins">Minutes<input type="number" id="p-mins" min="5" max="480" value="45"></label>
+        </div>
+        <div class="f" style="display:grid;gap:4px"><span style="font-size:12px;color:var(--muted);font-weight:600">Repeat on</span><div class="rep" id="rep"></div></div>
+        <div><button class="btn primary" type="submit">Add to plan</button></div>
+      </form>
+    </section>
+
+    <!-- ROOMS -->
+    <section class="view" id="v-rooms" aria-label="Rooms">
+      <h2>Focus rooms</h2>
+      <p class="lead">Study next to other people who have this page open. Pick a room code, share it, and see who is focusing right now.</p>
+      <div class="panel">
+        <div class="row">
+          <label class="f grow" for="r-name">Your name<input type="text" id="r-name" maxlength="24" placeholder="e.g. Sam"></label>
+          <label class="f grow" for="r-code">Room code<input type="text" id="r-code" maxlength="40" placeholder="lounge"></label>
+          <button class="btn primary sm" id="r-join">Join</button>
+          <button class="btn ghost sm" id="r-leave" hidden>Leave</button>
+        </div>
+        <div id="peers" class="list"><p class="empty">You are not in a room yet.</p></div>
+      </div>
+      <div class="panel">
+        <div class="row between"><h3>Weekly leaderboard</h3>
+          <label class="switch" for="r-board"><input type="checkbox" id="r-board"> Show me on it</label></div>
+        <div id="board" class="list"><p class="empty">Turn this on, set a name and finish a session to appear here.</p></div>
+      </div>
+    </section>
+
+    <!-- STATS -->
+    <section class="view" id="v-stats" aria-label="Insights">
+      <div class="row between"><h2>Insights</h2>
+        <div class="seg" id="range" role="group" aria-label="Range"><button data-r="7" aria-pressed="true">7 days</button><button data-r="30" aria-pressed="false">30 days</button></div></div>
+      <div class="cards panel" id="cards"></div>
+      <div class="panel"><h3>Focus minutes per day</h3><div class="chart" id="chart"></div><p class="note" id="insight"></p></div>
+      <div class="panel"><h3>By tag</h3><div class="list" id="tags"></div></div>
+      <div class="panel"><h3>Focused vs distracted</h3><div id="fvd"></div></div>
+      <div class="panel"><div class="row between"><h3>Achievements</h3><span class="note" id="achcount"></span></div><div class="badges" id="badges"></div></div>
+      <div class="row"><button class="btn sm ghost" id="sample">Load a sample month</button><button class="btn sm ghost" id="wipe">Clear all my data</button></div>
+    </section>
+
+    <!-- LIMITS -->
+    <section class="view" id="v-limits" aria-label="Limits">
+      <h2>Distraction limits</h2>
+      <p class="lead">Set a daily budget for the apps that pull you in, then log time as you use them. Zenith runs in a browser, so it cannot watch or block other apps on your phone. These limits are an honest tally you keep yourself.</p>
+      <div class="panel" id="limitlist"></div>
+      <form class="panel" id="limitform">
+        <h3>Add a limit</h3>
+        <div class="chips" id="presets"></div>
+        <div class="row">
+          <label class="f grow" for="l-name">App or site<input type="text" id="l-name" maxlength="30" placeholder="TikTok"></label>
+          <label class="f" for="l-min">Daily minutes<input type="number" id="l-min" min="1" max="600" value="30"></label>
+          <button class="btn primary sm" type="submit">Add</button>
+        </div>
+      </form>
