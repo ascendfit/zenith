@@ -1,0 +1,107 @@
+function pushPresence(){syncBlock();if(!curRoom||!dbAPI||!myId)return;var c=cfg(),st=T.running?(T.phase==='focus'?'focus':'break'):'idle',end=T.running&&c.mode!=='stopwatch'?Math.round(Date.now()+(T.total-elapsed())*1000):null;
+  dbAPI.collection('rooms').doc(curRoom.name).collection('peers').doc(myId).set({n:(c.name||'Guest').slice(0,24),st:st,end:end,tag:(T.tag||c.tag||'').slice(0,16),ts:Date.now()}).catch(function(){})}
+setInterval(function(){if(curRoom)pushPresence()},20000);
+setInterval(function(){if(curRoom&&view==='rooms')renderPeers()},15000);
+window.addEventListener('pagehide',function(){if(curRoom&&dbAPI&&myId)dbAPI.collection('rooms').doc(curRoom.name).collection('peers').doc(myId).delete().catch(function(){})});
+function syncPeerClock(){}
+function pushBoard(){if(!dbAPI||!myId||!cfg().board||!cfg().name)return;
+  dbAPI.collection('board').doc(myId).set({name:cfg().name.slice(0,24),week:dkey(monday(new Date())),weekMin:Math.round(weekMins()),ts:Date.now()}).catch(function(){})}
+function renderPeers(peers){lastPeers=peers||lastPeers;var el=$('#peers');
+  if(!curRoom){el.innerHTML='<p class="empty">You are not in a room yet.</p>';return}
+  var rows=lastPeers.filter(function(p){return p.kind==='viewer'&&p.presence&&typeof p.presence.ts==='number'&&Date.now()-p.presence.ts<60000}).map(function(p){var q=p.presence||{};return {me:p.isMe&&p.sameTab,n:typeof q.n==='string'?q.n.slice(0,24):'Guest',st:q.st==='focus'||q.st==='break'?q.st:'idle',end:typeof q.end==='number'?q.end:null,tag:typeof q.tag==='string'?q.tag.slice(0,16):''}});
+  rows.sort(function(a,b){return (b.st==='focus')-(a.st==='focus')});
+  var f=rows.filter(function(r){return r.st==='focus'}).length;
+  el.innerHTML='<p class="note"><b>'+rows.length+'</b> here · <b>'+f+'</b> focusing in <b>'+esc(curRoom.name)+'</b></p>'+rows.map(function(r){
+    return '<div class="item"><div class="t"><b>'+esc(r.n)+(r.me?' (you)':'')+'</b><div class="sub">'+(r.tag?esc(r.tag):'&nbsp;')+'</div></div>'+
+      (r.end?'<span class="mono note" data-end="'+r.end+'"></span>':'')+'<span class="pill '+(r.st==='focus'?'ok':r.st==='break'?'warn':'')+'">'+(r.st==='focus'?'Focusing':r.st==='break'?'On break':'Idle')+'</span></div>'}).join('');
+  tickPeers()}
+function tickPeers(){$$('[data-end]').forEach(function(n){var s=(+n.dataset.end-Date.now())/1000;n.textContent=s>0?mmss(s):''})}
+setInterval(tickPeers,1000);
+function renderBoard(){var el=$('#board'),wk=dkey(monday(new Date()));
+  var rows=boardRows.filter(function(r){return r.week===wk&&typeof r.weekMin==='number'}).sort(function(a,b){return b.weekMin-a.weekMin}).slice(0,20);
+  el.innerHTML=rows.length?rows.map(function(r,i){return '<div class="item"><span class="mono note" style="width:22px">'+(i+1)+'</span><div class="t"><b>'+esc(String(r.name||'Anonymous').slice(0,24))+(r.id===myId?' (you)':'')+'</b></div><span class="mono">'+fmtDur(r.weekMin)+'</span></div>'}).join(''):'<p class="empty">'+(dbAPI?'Nobody on the board yet this week. Turn it on, set a name and finish a session.':(fbOn()?'Sign in with Google to see the leaderboard.':'The leaderboard needs Firebase set up. See the README.'))+'</p>'}
+function renderRooms(){$('#r-name').value=cfg().name;$('#r-code').value=$('#r-code').value||cfg().room;$('#r-board').checked=!!cfg().board;$('#r-board').disabled=!dbAPI;
+  $('#r-join').hidden=!!curRoom;$('#r-leave').hidden=!curRoom;renderPeers();renderBoard()}
+$('#r-name').addEventListener('input',function(e){S.settings.name=e.target.value.trim().slice(0,24);save();pushPresence()});
+$('#r-name').addEventListener('change',function(){pushBoard()});
+$('#r-board').addEventListener('change',function(e){if(e.target.checked&&!cfg().name){e.target.checked=false;toast('Set your name first.');return}S.settings.board=e.target.checked;save();
+  if(e.target.checked)pushBoard();else if(dbAPI&&myId)dbAPI.collection('board').doc(myId).delete().catch(function(){})});
+$('#r-join').onclick=function(){
+  if(!dbAPI){toast(fbOn()?'Sign in with Google to join rooms.':'Rooms need Firebase set up. See the README.');return}
+  var code=$('#r-code').value.toLowerCase().replace(/[^a-z0-9_.-]/g,'').slice(0,40)||'lounge';
+  leaveRoom();curRoom={name:code};S.settings.room=code;save();
+  unPeers=dbAPI.collection('rooms').doc(code).collection('peers').limit(100).onSnapshot(function(sn){
+    renderPeers(sn.docs.map(function(d){return {kind:'viewer',isMe:d.id===myId,sameTab:d.id===myId,presence:d.data()}}))},function(){toast('Could not open that room.')});
+  pushPresence();renderRooms();toast('Joined '+code+'.')};
+function leaveRoom(){try{if(unPeers)unPeers()}catch(e){}unPeers=null;
+  if(curRoom&&dbAPI&&myId)dbAPI.collection('rooms').doc(curRoom.name).collection('peers').doc(myId).delete().catch(function(){});curRoom=null;lastPeers=[]}
+$('#r-leave').onclick=function(){leaveRoom();renderRooms()};
+
+/* ---------- Firebase: Google sign-in + Firestore ---------- */
+var auth=null,fdb=null,unBoard=null,user=null;
+function fbOn(){var c=window.TIDEWELL_FIREBASE;return !!(c&&c.apiKey&&window.firebase)}
+function renderAuth(){var b=$('#auth');if(!fbOn()||window.ZenithNative){b.hidden=true;return}b.hidden=false;
+  b.textContent=user?'Sign out ('+(user.displayName||'you').split(' ')[0]+')':'Sign in with Google'}
+$('#auth').onclick=function(){if(!auth)return;if(user){auth.signOut()}else{auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(function(e){toast('Sign-in did not finish.')})}};
+async function onUser(u){
+  user=u;
+  if(!u){leaveRoom();dbAPI=null;myId=null;try{if(unBoard)unBoard()}catch(e){}unBoard=null;boardRows=[];renderAuth();renderRooms();return}
+  myId=u.uid;dbAPI=fdb;if(!cfg().name&&u.displayName){S.settings.name=u.displayName.split(' ')[0].slice(0,24);save()}
+  try{var snap=await fdb.collection('users').doc(myId).get();
+    if(snap.exists){var d=snap.data(),st=d&&d.state?JSON.parse(d.state):null;
+      if(st&&(st.updated||0)>S.updated&&!T.begun){S=norm(st);try{localStorage.setItem('tidewell.v1',JSON.stringify(S))}catch(e){}setTotal();renderAll()}
+      else if(S.updated)dbSave()}
+    else if(S.updated)dbSave()}catch(e){}
+  try{unBoard=fdb.collection('board').where('week','==',dkey(monday(new Date()))).limit(100).onSnapshot(function(sn){boardRows=sn.docs.map(function(d){var x=d.data();x.id=d.id;return x});renderBoard()},function(){})}catch(e){}
+  renderAuth();renderRooms()}
+function initCaps(){
+  if(!fbOn()){renderAuth();renderRooms();return}
+  try{firebase.initializeApp(window.TIDEWELL_FIREBASE);auth=firebase.auth();fdb=firebase.firestore();auth.onAuthStateChanged(onUser)}catch(e){renderAuth()}
+  renderRooms()}
+
+/* ---------- native (Android) bridge ---------- */
+var NATIVE=window.ZenithNative||null,NST=null,NAPPS=null,NCFG=null,appQ='';
+function nj(name,def,a){try{return JSON.parse(a===undefined?NATIVE[name]():NATIVE[name](a))}catch(e){return def}}
+function syncBlock(){if(!NATIVE)return;try{
+  if(T.running&&T.phase==='focus')NATIVE.startBlocking(cfg().mode==='stopwatch'?0:Math.round(Date.now()+(T.total-elapsed())*1000),!!cfg().strict);
+  else{NATIVE.stopBlocking(!!T.force);T.force=false}}catch(e){}}
+function ncfgSave(){try{NATIVE.setConfig(JSON.stringify(NCFG))}catch(e){}}
+var PERMS=[['accessibility','Accessibility','Sees which app is on screen so it can be blocked.'],['notif','Notification access','Hides other notifications during focus.'],['usage','Usage access','Reads daily app time for limits.'],['admin','Device admin','Stops Zenith being uninstalled in strict mode.']];
+function renderBlocks(){
+  var el=$('#blocksbody');
+  if(!NATIVE){el.innerHTML='<div class="panel"><h3>Android app only</h3><p class="lead">Blocking other apps, Shorts and Reels, websites and notifications needs the Zenith Android app. In a browser, Zenith can only lock its own tab.</p></div>';return}
+  NST=nj('getState',{perms:{},cfg:{}});
+  NCFG=Object.assign({apps:{},yt:false,ig:false,notif:false,sites:[],adult:false,uninstall:false,split:false,floating:false},NST.cfg||{});
+  if(!NAPPS)NAPPS=nj('getApps',[]);
+  var usage=nj('getUsage',{}),p=NST.perms||{};
+  function sw(k,l,d){return '<label class="switch item" for="nb-'+k+'"><input type="checkbox" id="nb-'+k+'" data-nb="'+k+'"'+(NCFG[k]?' checked':'')+'><span class="t"><b>'+l+'</b><div class="sub">'+d+'</div></span></label>'}
+  var h='<div class="panel"><h3>Permissions</h3>'+PERMS.map(function(x){return '<div class="item perm"><div class="t"><b>'+x[1]+'</b><div class="sub">'+x[2]+'</div></div>'+(p[x[0]]?'<span class="pill ok">On</span>':'<button class="btn sm primary" data-perm="'+x[0]+'">Enable</button>')+'</div>'}).join('')+'</div>';
+  h+='<div class="panel"><h3>During focus</h3>'+sw('yt','Block YouTube Shorts','Sends you back out of the Shorts feed.')+sw('ig','Block Instagram Reels','Sends you back out of Reels.')+sw('notif','Block notifications','Silences other apps while you focus.')+sw('adult','Block adult sites','Closes known adult sites in common browsers.')+'<label class="f" for="nb-sites">Block these websites (one per line)<textarea id="nb-sites" rows="3" placeholder="reddit.com">'+esc((NCFG.sites||[]).join('\n'))+'</textarea></label></div>';
+  h+='<div class="panel"><h3>Strict mode protections</h3>'+sw('uninstall','Uninstall protection','Zenith cannot be uninstalled or switched off in Settings while strict mode runs.')+sw('split','Block split screen','Blocked apps cannot sit in split screen.')+sw('floating','Block floating windows','Blocked apps cannot open in a floating window.')+'</div>';
+  h+='<div class="panel"><div class="row between"><h3>Apps</h3><input type="text" id="appq" placeholder="Search apps" value="'+esc(appQ)+'" style="width:160px"></div><p class="note">Block applies during every focus round. A daily limit blocks the app for the rest of the day once you reach it.</p><div class="list" id="applist"></div></div>';
+  el.innerHTML=h;renderAppList(usage)}
+function renderAppList(usage){usage=usage||{};var q=appQ.toLowerCase(),L=$('#applist');if(!L||!NAPPS)return;
+  L.innerHTML=NAPPS.filter(function(a){return !q||a.name.toLowerCase().indexOf(q)>=0}).map(function(a){var c=(NCFG.apps||{})[a.pkg]||{};
+    return '<div class="item"><img class="appic" data-ic="'+esc(a.pkg)+'" alt=""><div class="t"><b>'+esc(a.name)+'</b><div class="sub">'+(usage[a.pkg]?usage[a.pkg]+' min today':'&nbsp;')+'</div></div>'+
+     '<label class="switch" for="ab-'+esc(a.pkg)+'"><input type="checkbox" id="ab-'+esc(a.pkg)+'" data-ab="'+esc(a.pkg)+'"'+(c.block?' checked':'')+'> Block</label>'+
+     '<select data-al="'+esc(a.pkg)+'" aria-label="Daily limit for '+esc(a.name)+'">'+[[0,'No limit'],[15,'15 min'],[30,'30 min'],[60,'1 h'],[120,'2 h'],[180,'3 h']].map(function(o){return '<option value="'+o[0]+'"'+((c.limit||0)===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'}).join('')||'<p class="empty">No apps found.</p>';
+  var imgs=$$('img[data-ic]',L),i=0;(function next(){var n=0;while(i<imgs.length&&n<8){try{imgs[i].src=NATIVE.getIcon(imgs[i].dataset.ic)}catch(e){}i++;n++}if(i<imgs.length)setTimeout(next,30)})()}
+$('#v-blocks').addEventListener('click',function(e){var b=e.target.closest('button');if(b&&b.dataset.perm&&NATIVE){try{NATIVE.openSettings(b.dataset.perm)}catch(x){}}});
+$('#v-blocks').addEventListener('change',function(e){var t=e.target;if(!NCFG)return;
+  if(t.dataset.nb){NCFG[t.dataset.nb]=t.checked;ncfgSave()}
+  else if(t.id==='nb-sites'){NCFG.sites=t.value.split('\n').map(function(x){return x.trim().toLowerCase()}).filter(Boolean);ncfgSave()}
+  else if(t.dataset.ab||t.dataset.al){var k=t.dataset.ab||t.dataset.al,c=NCFG.apps[k]||(NCFG.apps[k]={});if(t.dataset.ab)c.block=t.checked;else c.limit=+t.value;if(!c.block&&!c.limit)delete NCFG.apps[k];ncfgSave()}});
+$('#v-blocks').addEventListener('input',function(e){if(e.target.id==='appq'){appQ=e.target.value;renderAppList()}});
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&view==='blocks')renderBlocks()});
+
+function renderAll(){renderFocus();if(view==='plan')renderPlan();if(view==='stats')renderStats();if(view==='limits')renderLimits();if(view==='rooms')renderRooms()}
+$('#logo').innerHTML=zee('happy');
+$('#goal').addEventListener('input',function(e){var v=+e.target.value;if(v>=10&&v<=720){S.settings.goal=v;save();renderHome()}});
+setTotal();
+go((location.hash||'#focus').slice(1));
+renderFocus();
+initCaps();
+})();
+if("serviceWorker" in navigator&&location.protocol.indexOf("http")===0&&!window.ZenithNative){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})})}
+</script>
+</body></html>
