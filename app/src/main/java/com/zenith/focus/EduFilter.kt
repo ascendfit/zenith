@@ -8,8 +8,9 @@ import org.json.JSONObject
 /**
  * "Educational videos only" mode for YouTube.
  * Android cannot understand a video, so this reads the title and text shown in the top part of the
- * watch page and checks it against word lists. Bad words block, then education words allow,
- * anything else is blocked. Users can add their own words in the Blocks tab.
+ * watch page and checks it against word lists.
+ * If the user has a study list, only videos matching it are allowed. Otherwise bad words block,
+ * then education words allow, and anything else is blocked.
  */
 object EduFilter {
     private val DEFAULT_EDU = listOf(
@@ -25,7 +26,12 @@ object EduFilter {
         "trailer", "music video", "remix", "challenge", "bigg boss", "web series", "full movie", "celebrity",
     )
 
-    class Rules(val enabled: Boolean, val edu: List<String>, val bad: List<String>)
+    class Rules(
+        val enabled: Boolean,
+        val edu: List<String>,
+        val bad: List<String>,
+        val study: List<String> = emptyList(),
+    )
 
     fun rules(c: Context): Rules {
         return try {
@@ -40,7 +46,7 @@ object EduFilter {
                 }
                 return out
             }
-            Rules(enabled, DEFAULT_EDU + words("eduWords"), DEFAULT_BAD + words("badWords"))
+            Rules(enabled, DEFAULT_EDU + words("eduWords"), DEFAULT_BAD + words("badWords"), words("studyWords"))
         } catch (e: Exception) {
             Rules(false, DEFAULT_EDU, DEFAULT_BAD)
         }
@@ -52,13 +58,14 @@ object EduFilter {
         val text = StringBuilder()
     }
 
-    /** True when a YouTube video page is open and its title does not look educational. */
+    /** True when a YouTube video page is open and the video is not allowed. */
     fun blocked(root: AccessibilityNodeInfo, screenH: Int, r: Rules): Boolean {
         val st = Scan()
         scan(root, screenH, st, 0)
         if (!st.watch) return false
         val text = st.text.toString().lowercase()
         if (text.isBlank()) return false
+        if (r.study.isNotEmpty()) return !r.study.any { text.contains(it) }
         if (r.bad.any { text.contains(it) }) return true
         return !r.edu.any { text.contains(it) }
     }
