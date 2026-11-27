@@ -1,0 +1,52 @@
+name: Build Zenith APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the web UI from its parts
+        run: |
+          cat assets_src/index.part* > app/src/main/assets/index.html
+          wc -c app/src/main/assets/index.html
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee build.log
+
+      - name: Publish APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Zenith.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Zenith.apk --title "Zenith (latest build)" --notes "Download Zenith.apk and install it."
+
+      - name: Publish error summary if the build failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -E "^e: |error:|What went wrong|FAILED" -A3 build.log | head -80 > errors.txt || true
+          [ -s errors.txt ] || tail -60 build.log > errors.txt
+          gh release delete build-failed --yes --cleanup-tag || true
+          gh release create build-failed errors.txt --title "Build failed" --notes "Open errors.txt and send its text to Claude."
