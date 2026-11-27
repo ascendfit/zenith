@@ -13,15 +13,18 @@ import java.util.Calendar
 
 /**
  * Watches which app is on screen and sends the user home when something blocked opens.
- * It only looks at package names, view ids and the browser address bar. It stores nothing.
+ * It only looks at package names, view ids, the browser address bar and the YouTube video title.
+ * It stores nothing.
  */
 class BlockerService : AccessibilityService() {
     private var cfg: Cfg = Cfg.EMPTY
+    private var edu: EduFilter.Rules = EduFilter.Rules(false, emptyList(), emptyList())
     private var cfgAt = 0L
     private var launcherPkg: String? = null
     private var lastAction = 0L
     private var lastHeavy = 0L
     private var lastBack = 0L
+    private var lastEdu = 0L
     private val usageCache = HashMap<String, Pair<Long, Int>>()
 
     override fun onServiceConnected() {
@@ -40,6 +43,7 @@ class BlockerService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - cfgAt > 2000L) {
             cfg = Prefs.cfg(this)
+            edu = EduFilter.rules(this)
             cfgAt = now
         }
         val active = Prefs.isActive(this)
@@ -64,7 +68,7 @@ class BlockerService : AccessibilityService() {
 
         if (!active) return
 
-        // 3. Apps blocked during focus.
+        // 3. Apps blocked during focus (the whole app cannot be opened).
         if (pkg in cfg.block) {
             goHome(pkg, "Focus mode is on")
             return
@@ -80,12 +84,22 @@ class BlockerService : AccessibilityService() {
         if (now - lastHeavy < 250L) return
         lastHeavy = now
 
-        // 5. Shorts and Reels.
-        if ((pkg == Targets.YOUTUBE && cfg.yt && anyVisible(Targets.YT_SHORTS_IDS)) ||
+        // 5. Shorts and Reels. Educational-only mode also blocks all Shorts.
+        if ((pkg == Targets.YOUTUBE && (cfg.yt || edu.enabled) && anyVisible(Targets.YT_SHORTS_IDS)) ||
             (pkg == Targets.INSTAGRAM && cfg.ig && anyVisible(Targets.IG_REELS_IDS))
         ) {
             leaveFeed(now)
             return
+        }
+
+        // 5b. YouTube educational-only mode: block videos whose title does not look educational.
+        if (pkg == Targets.YOUTUBE && edu.enabled && now - lastEdu > 1200L) {
+            lastEdu = now
+            val root = rootInActiveWindow
+            if (root != null && EduFilter.blocked(root, resources.displayMetrics.heightPixels, edu)) {
+                goHome(pkg, "Only educational videos are allowed during focus")
+                return
+            }
         }
 
         // 6. Websites.

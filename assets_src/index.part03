@@ -67,16 +67,22 @@ function syncBlock(){if(!NATIVE)return;try{
   else{NATIVE.stopBlocking(!!T.force);T.force=false}}catch(e){}}
 function ncfgSave(){try{NATIVE.setConfig(JSON.stringify(NCFG))}catch(e){}}
 var PERMS=[['accessibility','Accessibility','Sees which app is on screen so it can be blocked.'],['notif','Notification access','Hides other notifications during focus.'],['usage','Usage access','Reads daily app time for limits.'],['admin','Device admin','Stops Zenith being uninstalled in strict mode.']];
+var QUICK=[['Instagram','com.instagram.android'],['YouTube','com.google.android.youtube'],['Snapchat','com.snapchat.android'],['TikTok','com.zhiliaoapp.musically'],['Facebook','com.facebook.katana'],['X','com.twitter.android']];
+function wl(s){return String(s||'').split(/[,\n]/).map(function(x){return x.trim().toLowerCase()}).filter(Boolean)}
 function renderBlocks(){
   var el=$('#blocksbody');
   if(!NATIVE){el.innerHTML='<div class="panel"><h3>Android app only</h3><p class="lead">Blocking other apps, Shorts and Reels, websites and notifications needs the Zenith Android app. In a browser, Zenith can only lock its own tab.</p></div>';return}
   NST=nj('getState',{perms:{},cfg:{}});
-  NCFG=Object.assign({apps:{},yt:false,ig:false,notif:false,sites:[],adult:false,uninstall:false,split:false,floating:false},NST.cfg||{});
+  NCFG=Object.assign({apps:{},yt:false,ytEdu:false,eduWords:[],badWords:[],ig:false,notif:false,sites:[],adult:false,uninstall:false,split:false,floating:false},NST.cfg||{});
   if(!NAPPS)NAPPS=nj('getApps',[]);
   var usage=nj('getUsage',{}),p=NST.perms||{};
   function sw(k,l,d){return '<label class="switch item" for="nb-'+k+'"><input type="checkbox" id="nb-'+k+'" data-nb="'+k+'"'+(NCFG[k]?' checked':'')+'><span class="t"><b>'+l+'</b><div class="sub">'+d+'</div></span></label>'}
   var h='<div class="panel"><h3>Permissions</h3>'+PERMS.map(function(x){return '<div class="item perm"><div class="t"><b>'+x[1]+'</b><div class="sub">'+x[2]+'</div></div>'+(p[x[0]]?'<span class="pill ok">On</span>':'<button class="btn sm primary" data-perm="'+x[0]+'">Enable</button>')+'</div>'}).join('')+'</div>';
-  h+='<div class="panel"><h3>During focus</h3>'+sw('yt','Block YouTube Shorts','Sends you back out of the Shorts feed.')+sw('ig','Block Instagram Reels','Sends you back out of Reels.')+sw('notif','Block notifications','Silences other apps while you focus.')+sw('adult','Block adult sites','Closes known adult sites in common browsers.')+'<label class="f" for="nb-sites">Block these websites (one per line)<textarea id="nb-sites" rows="3" placeholder="reddit.com">'+esc((NCFG.sites||[]).join('\n'))+'</textarea></label></div>';
+  var inst={};(NAPPS||[]).forEach(function(a){inst[a.pkg]=1});
+  var chips=QUICK.filter(function(q){return inst[q[1]]}).map(function(q){var on=!!((NCFG.apps[q[1]]||{}).block);return '<button class="chip" data-quick="'+q[1]+'" aria-pressed="'+on+'">'+q[0]+'</button>'}).join('');
+  h+='<div class="panel"><h3>Block a whole app</h3><p class="note">Turn an app on and it cannot be opened at all while a focus round is running. Any other app can be picked in the list at the bottom.</p><div class="chips">'+(chips||'<span class="note">None of the common social apps found.</span>')+'</div></div>';
+  h+='<div class="panel"><h3>YouTube and Reels</h3>'+sw('ytEdu','YouTube: educational videos only','Shorts are always closed. A normal video opens only if its title looks educational (lecture, tutorial, course, subject names...). Everything else is closed.')+'<label class="f" for="nb-edu">Extra words that count as educational (comma separated)<textarea id="nb-edu" rows="2" placeholder="organic chemistry, pharmacology">'+esc((NCFG.eduWords||[]).join(', '))+'</textarea></label><label class="f" for="nb-bad">Words that are always blocked (comma separated)<textarea id="nb-bad" rows="2" placeholder="stream, highlights">'+esc((NCFG.badWords||[]).join(', '))+'</textarea></label>'+sw('yt','Block YouTube Shorts only','Closes only the Shorts feed and leaves normal videos alone.')+sw('ig','Block Instagram Reels only','Sends you back out of Reels but lets the rest of Instagram open.')+'</div>';
+  h+='<div class="panel"><h3>During focus</h3>'+sw('notif','Block notifications','Silences other apps while you focus.')+sw('adult','Block adult sites','Closes known adult sites in common browsers.')+'<label class="f" for="nb-sites">Block these websites (one per line)<textarea id="nb-sites" rows="3" placeholder="reddit.com">'+esc((NCFG.sites||[]).join('\n'))+'</textarea></label></div>';
   h+='<div class="panel"><h3>Strict mode protections</h3>'+sw('uninstall','Uninstall protection','Zenith cannot be uninstalled or switched off in Settings while strict mode runs.')+sw('split','Block split screen','Blocked apps cannot sit in split screen.')+sw('floating','Block floating windows','Blocked apps cannot open in a floating window.')+'</div>';
   h+='<div class="panel"><div class="row between"><h3>Apps</h3><input type="text" id="appq" placeholder="Search apps" value="'+esc(appQ)+'" style="width:160px"></div><p class="note">Block applies during every focus round. A daily limit blocks the app for the rest of the day once you reach it.</p><div class="list" id="applist"></div></div>';
   el.innerHTML=h;renderAppList(usage)}
@@ -86,10 +92,14 @@ function renderAppList(usage){usage=usage||{};var q=appQ.toLowerCase(),L=$('#app
      '<label class="switch" for="ab-'+esc(a.pkg)+'"><input type="checkbox" id="ab-'+esc(a.pkg)+'" data-ab="'+esc(a.pkg)+'"'+(c.block?' checked':'')+'> Block</label>'+
      '<select data-al="'+esc(a.pkg)+'" aria-label="Daily limit for '+esc(a.name)+'">'+[[0,'No limit'],[15,'15 min'],[30,'30 min'],[60,'1 h'],[120,'2 h'],[180,'3 h']].map(function(o){return '<option value="'+o[0]+'"'+((c.limit||0)===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'}).join('')||'<p class="empty">No apps found.</p>';
   var imgs=$$('img[data-ic]',L),i=0;(function next(){var n=0;while(i<imgs.length&&n<8){try{imgs[i].src=NATIVE.getIcon(imgs[i].dataset.ic)}catch(e){}i++;n++}if(i<imgs.length)setTimeout(next,30)})()}
-$('#v-blocks').addEventListener('click',function(e){var b=e.target.closest('button');if(b&&b.dataset.perm&&NATIVE){try{NATIVE.openSettings(b.dataset.perm)}catch(x){}}});
+$('#v-blocks').addEventListener('click',function(e){var b=e.target.closest('button');if(!b||!NATIVE)return;
+  if(b.dataset.perm){try{NATIVE.openSettings(b.dataset.perm)}catch(x){}}
+  else if(b.dataset.quick&&NCFG){var k=b.dataset.quick,c=NCFG.apps[k]||(NCFG.apps[k]={});c.block=!c.block;if(!c.block&&!c.limit)delete NCFG.apps[k];ncfgSave();renderBlocks()}});
 $('#v-blocks').addEventListener('change',function(e){var t=e.target;if(!NCFG)return;
   if(t.dataset.nb){NCFG[t.dataset.nb]=t.checked;ncfgSave()}
   else if(t.id==='nb-sites'){NCFG.sites=t.value.split('\n').map(function(x){return x.trim().toLowerCase()}).filter(Boolean);ncfgSave()}
+  else if(t.id==='nb-edu'){NCFG.eduWords=wl(t.value);ncfgSave()}
+  else if(t.id==='nb-bad'){NCFG.badWords=wl(t.value);ncfgSave()}
   else if(t.dataset.ab||t.dataset.al){var k=t.dataset.ab||t.dataset.al,c=NCFG.apps[k]||(NCFG.apps[k]={});if(t.dataset.ab)c.block=t.checked;else c.limit=+t.value;if(!c.block&&!c.limit)delete NCFG.apps[k];ncfgSave()}});
 $('#v-blocks').addEventListener('input',function(e){if(e.target.id==='appq'){appQ=e.target.value;renderAppList()}});
 document.addEventListener('visibilitychange',function(){if(!document.hidden&&view==='blocks')renderBlocks()});
